@@ -412,13 +412,18 @@ class MainWindow(wx.Frame):
     def __check_for_errors(self, r: dict) -> bool:
         if 'error' in r:
             self.__exit_wait_mode()
-            if self.__g is None:
+            exc_name = r['error']
+            if 'message' in r:
+                exc_message = r['message'].replace('D:\\bg3modding\\src\\bg3modding\\src', '...')
+            else:
+                exc_message = 'No further details are available'
+            message = f'An unexpected error has occurred. Please check the log file for details.\nError message: "{exc_name}"\n{exc_message}\n'
+            wx.MessageBox(message, caption = 'Guidance', style = wx.ICON_ERROR | wx.OK | wx.CENTER, parent = self)
+            if self.__g is None or self.__splash.visible:
                 self.__splash.hide_splash_screen()
                 self.__runner.stop()
-                wx.MessageBox('Sanity check has failed. Most likely you need to install .NET 8.0.\r\nPlease,\r\n1) Visit https://dotnet.microsoft.com/en-us/download/dotnet/8.0\r\n2) Download and install .NET Runtime 8.0.x', caption = 'Guidance', style = wx.ICON_ERROR | wx.OK | wx.CENTER, parent = self)
                 self.Close(force = True)
                 return True
-            wx.MessageBox('An unexpected error has occurred. Please check the log file for details.', caption = 'Guidance', style = wx.ICON_ERROR | wx.OK | wx.CENTER, parent = self)
             return True
         return False
 

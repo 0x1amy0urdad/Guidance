@@ -12,6 +12,7 @@ class config:
     __env_root_path: str = ""
     __bg3_exe_path: str = ""
     __bg3_appdata_path: str = ""
+    __bg3_toolkit_path: str = ""
     __window_width: int = 640
     __window_height: int = 768
 
@@ -79,6 +80,9 @@ class config:
         with open(self.config_file_path, 'rt') as f:
             get_logger().info(f'Loading configuration from {self.config_file_path}')
             cfg = cast(dict, json.load(f))
+            if 'bg3_toolkit_path' in cfg:
+                self.__bg3_toolkit_path = cast(str, cfg['bg3_toolkit_path'])
+                get_logger().info(f'Configuration: bg3_toolkit_path = {self.__bg3_exe_path}')
             if 'bg3_exe_path' in cfg:
                 self.__bg3_exe_path = cast(str, cfg['bg3_exe_path'])
                 get_logger().info(f'Configuration: bg3_exe_path = {self.__bg3_exe_path}')
@@ -98,6 +102,8 @@ class config:
             cfg = dict()
             if self.__bg3_exe_path:
                 cfg['bg3_exe_path'] = self.__bg3_exe_path
+            if self.__bg3_toolkit_path:
+                cfg['bg3_toolkit_path'] = self.__bg3_toolkit_path
             if self.__bg3_appdata_path:
                 cfg['bg3_appdata_path'] = self.__bg3_appdata_path
             cfg['window_width'] = self.__window_width

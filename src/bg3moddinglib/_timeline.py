@@ -22,6 +22,7 @@ from ._constants import (
     PEANUT_SLOT_1,
     PEANUT_SLOT_2,
     PEANUTS,
+    SPEAKER_NAME,
     SPEAKER_NARRATOR,
     SPEAKER_PLAYER
 )
@@ -179,6 +180,12 @@ class timeline_object:
         children = current_node.findall("./children/node")
         for child in children:
             timeline_object.__recurse_update_node_times(child, time_delta)
+
+    def __add_combat_timeline_handler(self) -> None:
+        node = self.__file.root_node.find('./region[@id="TimelineContent"]/node[@id="TimelineContent"]/children/node[@id="CombatTimelineHandlers"]/children')
+        if node is None:
+            raise RuntimeError('cannot find the CombatTimelineHandlers parent node')
+        node.append(et.fromstring('<node id="CombatTimelineHandler"><attribute id="Priority" type="int32" value="0" /></node>'))
 
     def __update_phase_duration(self) -> None:
         effect_node = self.__file.root_node.find('./region[@id="TimelineContent"]/node[@id="TimelineContent"]/children/node[@id="Effect"]')
@@ -379,6 +386,7 @@ class timeline_object:
         self.__phases_durations.append(effective_phase_duration)
         self.__phases_end_times.append(self.__duration)
         self.__find_node_insertion_index()
+        self.__add_combat_timeline_handler()
         self.__update_phase_duration()
         return self.__current_phase_index
 
@@ -445,7 +453,7 @@ class timeline_object:
     def get_tl_node_speaker_uuid(self, tl_node: et.Element) -> str | None:
         actor_node = tl_node.find('./children/node[@id="Actor"]')
         if actor_node is None:
-            raise RuntimeError("cannot determine actor: actor node doesn't exist")
+            raise RuntimeError(f"cannot determine actor: actor is not defined in {to_compact_string(tl_node)}")
         actor_uuid = get_required_bg3_attribute(actor_node, 'UUID')
         speakers = self.__file.xml.findall('./region[@id="TimelineContent"]/node[@id="TimelineContent"]/children/node[@id="TimelineSpeakers"]/children/node[@id="TimelineSpeaker"]/children/node[@id="Object"][@key="MapKey"]')
         for speaker in speakers:
@@ -454,6 +462,15 @@ class timeline_object:
                 speaker_index = get_required_bg3_attribute(speaker, 'MapKey')
                 return self.__dialog.get_speaker_by_index(int(speaker_index))
         return None
+
+    def get_speaker_index(self, actor_uuid: str) -> int:
+        speakers = self.__file.xml.findall('./region[@id="TimelineContent"]/node[@id="TimelineContent"]/children/node[@id="TimelineSpeakers"]/children/node[@id="TimelineSpeaker"]/children/node[@id="Object"][@key="MapKey"]')
+        for speaker in speakers:
+            map_val = get_required_bg3_attribute(speaker, 'MapValue')
+            if map_val == actor_uuid:
+                speaker_index = get_required_bg3_attribute(speaker, 'MapKey')
+                return int(speaker_index)
+        raise RuntimeError(f'cannot find speaker actor {actor_uuid}')
 
     def clone_tl_node(
             self,
@@ -1653,7 +1670,18 @@ class timeline_object:
         if value_name is None:
             value_name = "Value"
         if isinstance(value_type, str):
-            xml.append(f'<attribute id="{value_name}" type="{value_type}" value="{value}" />')
+            if value_type == 'fvec4':
+                if isinstance(value, tuple | list) and get_len(value) == 4:
+                    xml.append(f'<attribute id="{value_name}" type="{value_type}" value="{value[0]} {value[1]} {value[2]} {value[3]}" />')
+                else:
+                    raise RuntimeError(f"expected a collection of 4 items but got: {value}")
+            elif value_type == 'fvec3':
+                if isinstance(value, tuple | list) and get_len(value) == 3:
+                    xml.append(f'<attribute id="{value_name}" type="{value_type}" value="{value[0]} {value[1]} {value[2]}" />')
+                else:
+                    raise RuntimeError(f"expected a collection of 3 items but got: {value}")
+            else:
+                xml.append(f'<attribute id="{value_name}" type="{value_type}" value="{value}" />')
         elif isinstance(value, bool):
             xml.append(f'<attribute id="{value_name}" type="bool" value="{value}" />')
         elif isinstance(value, float) or isinstance(value, int) or isinstance(value, dc.Decimal):
@@ -2490,3 +2518,150 @@ class timeline_object:
                 f'<attribute id="RotationQuat" type="fvec4" value="{rotation[0]} {rotation[1]} {rotation[2]} {rotation[3]}" />',
                 '</node>',
             ]))
+
+    def get_emotions_keys(self, tl_node_uuid: str) -> tuple[tuple[str, int, int], ...]:
+        ec = self.find_effect_component(tl_node_uuid)
+        start_time = get_bg3_attribute(ec, 'StartTime')
+        if isinstance(start_time, str):
+            start_time = decimal_from_str(start_time)
+        else:
+            start_time = decimal_from_str('0.0')
+        n = ec.find('./children/node[@id="Keys"]/children')
+        if n is None:
+            return ()
+        keys = n.findall('./node[@id="Key"]')
+        result = list[tuple[str, int, int]]()
+        for key in keys:
+            time = get_bg3_attribute(key, 'Time')
+            if isinstance(time, str):
+                time = decimal_from_str(time)
+            else:
+                time = decimal_from_str('0.0')
+            emotion = get_bg3_attribute(key, 'Emotion')
+            if isinstance(emotion, str):
+                emotion = int(emotion)
+            else:
+                emotion = 0
+            variation = get_bg3_attribute(key, 'Variation')
+            if isinstance(variation, str):
+                variation = int(variation)
+            else:
+                variation = 0
+            result.append((str(time - start_time), emotion, variation))
+        return tuple(result)
+
+    def get_cameras(self, phase_id: str | int) -> dict[str, dict[str, str]]:
+        result = dict[str, dict[str, str]]()
+        scenecams = self.get_timeline_actors('scenecam')
+        tl_phase = self.get_timeline_phase(phase_id)
+        effect_components = self.__effect_components_parent_node.findall('./node[@id="EffectComponent"]')
+        phase_start = None
+        for node in effect_components:
+            phase_index = get_bg3_attribute(node, 'PhaseIndex')
+            if phase_index is None:
+                phase_index = 0
+            else:
+                phase_index = int(phase_index)
+            start_time = get_bg3_attribute(node, 'StartTime')
+            end_time = decimal_from_str(get_required_bg3_attribute(node, 'EndTime'))
+            if start_time is None:
+                start_time = DECIMAL_ZERO
+            else:
+                start_time = decimal_from_str(start_time)
+
+            if phase_index == tl_phase.index:
+                if phase_start is None:
+                    phase_start = start_time
+                elif phase_start > start_time:
+                    phase_start = start_time
+            elif phase_index > tl_phase.index:
+                break
+            else:
+                continue
+
+            if get_bg3_attribute(node, 'Type') != 'TLShot' or phase_start is None:
+                continue
+            camcont = node.find('./children/node[@id="CameraContainer"]')
+            if camcont is None:
+                continue
+            camcont_uuid = get_required_bg3_attribute(camcont, 'Object')
+            scenecam = scenecams[camcont_uuid]
+            start_time = str(start_time - phase_start)
+            end_time = str(end_time - phase_start)
+            camera_uuid = get_required_bg3_attribute(scenecam, 'Camera')
+            attach_to = get_required_bg3_attribute(scenecam, 'AttachTo')
+            attach_to_speaker_idx = self.get_speaker_index(attach_to)
+            attach_to_speaker = self.__dialog.get_speaker_by_index(attach_to_speaker_idx)
+            if attach_to_speaker in SPEAKER_NAME:
+                attach_to_speaker_name = SPEAKER_NAME[attach_to_speaker]
+            else:
+                attach_to_speaker_name = attach_to_speaker
+            look_at = get_required_bg3_attribute(scenecam, 'LookAt')
+            look_at_speaker_idx = self.get_speaker_index(look_at)
+            look_at_speaker = self.__dialog.get_speaker_by_index(look_at_speaker_idx)
+            if look_at_speaker in SPEAKER_NAME:
+                look_at_speaker_name = SPEAKER_NAME[look_at_speaker]
+            else:
+                look_at_speaker_name = look_at_speaker
+            d = dict[str, str]()
+            d['start_time'] = start_time
+            d['end_time'] = end_time
+            d['attach_to'] = attach_to_speaker_name
+            d['look_at'] = look_at_speaker_name
+            d['camera'] = camera_uuid
+            d['camera_container'] = camcont_uuid
+            result[start_time] = d
+        return result
+
+    def get_container_of_camera(self, camera_uuid: str) -> str:
+        scenecams = self.get_timeline_actors('scenecam')
+        for container_uuid, scenecam in scenecams.items():
+            if camera_uuid == get_required_bg3_attribute(scenecam, 'Camera'):
+                return container_uuid
+        raise RuntimeError(f'cannot find a container for camera {camera_uuid}')
+
+    def is_camera_container(self, camera_container_uuid: str) -> bool:
+        return camera_container_uuid in self.get_timeline_actors('scenecam')
+
+    def get_camera_from_container(self, camera_container_uuid: str) -> str:
+        scenecams = self.get_timeline_actors('scenecam')
+        if camera_container_uuid in scenecams:
+            return get_required_bg3_attribute(scenecams[camera_container_uuid], 'Camera')
+        raise RuntimeError(f'cannot find camera container {camera_container_uuid}')
+
+    def pad_timeline(self) -> None:
+        effect_components = self.__effect_components_parent_node.findall('./node[@id="EffectComponent"]')
+        idx = len(effect_components) - 1
+        if idx < 0:
+            return
+        phase_index = -1
+        the_end_time = DECIMAL_ZERO
+        while idx >= 0:
+            effect_component = effect_components[idx]
+            idx -= 1
+
+            cur_phase_index = get_bg3_attribute(effect_component, 'PhaseIndex')
+            if cur_phase_index is None:
+                cur_phase_index = 0
+            else:
+                cur_phase_index = int(cur_phase_index)
+            if phase_index == -1:
+                phase_index = cur_phase_index
+            else:
+                if cur_phase_index != phase_index:
+                    break
+
+            end_time = decimal_from_str(get_required_bg3_attribute(effect_component, 'EndTime'))
+            if the_end_time < end_time:
+                the_end_time = end_time
+
+        fractional_part = decimal_from_str(the_end_time) % 1
+        if fractional_part == DECIMAL_ZERO:
+            return
+        one = dc.Decimal('1.00000000')
+        duration = one - fractional_part
+        if duration < dc.Decimal('0.1'):
+            duration = duration + one
+
+        self.create_new_phase(new_random_uuid(), duration)
+        self.create_tl_shot(new_random_uuid(), DECIMAL_ZERO, duration, is_snapped_to_end = True)

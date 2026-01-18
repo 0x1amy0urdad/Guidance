@@ -2,6 +2,7 @@ from ._guidance import (
     config,
     guidance,
     APP_NAME,
+    INITIALIZED,
 )
 from ._logger import logger
 from ._main import main

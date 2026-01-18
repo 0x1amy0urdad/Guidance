@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ._assets import bg3_assets
-from ._common import get_bg3_attribute, get_required_bg3_attribute, find_bg3_appdata_path, new_random_uuid
+from ._common import (
+    get_bg3_attribute,
+    get_required_bg3_attribute,
+    find_bg3_appdata_path,
+    new_random_uuid,
+    set_bg3_attribute
+)
 from ._dialog import dialog_object
 from ._dialog_differ import dialog_differ
 from ._env import bg3_modding_env
@@ -43,7 +49,7 @@ class mod_info:
     mod_uuid: str
     mod_version: tuple[int, int, int, int]
     pak_path: str = ""
-    mod_files: list[str] = field(default_factory = list)
+    mod_files: tuple[str, ...] = field(default_factory = tuple)
     content: pak_content | None = None
     meta_lsx: XmlElement | None = None
     mod_description: str = ""
@@ -244,6 +250,7 @@ class mod_manager:
                 if progress_callback is not None:
                     progress_callback(count, total_count, f'[{count:3}/{total_count:3}] Reading pak file: {os.path.basename(pak_path)}')
                 self.__add_mod(pak_path)
+        self.__filter_out_mods()
         self.__mods_imm = tuple(self.__mods)
 
     def detect_conflicts(self, progress_callback: Callable[[int, int, str], None] | None = None) -> bool:
@@ -341,46 +348,71 @@ class mod_manager:
             self.__mods_index[mod_uuid] = mi
 
     def __add_mod(self, pak_path: str) -> None:
-        mod_files = self.__assets.tool.list(pak_path)
-        content = pak_content(self.__assets, pak_path)
-        for f in mod_files:
-            if f.endswith('meta.lsx'):
-                meta_lsx = self.__assets.tool.unpack(pak_path, f)
-                meta_lsx_xml = et.parse(meta_lsx).getroot()
-                module_info = meta_lsx_xml.find('./region[@id="Config"]/node[@id="root"]/children/node[@id="ModuleInfo"]')
-                if module_info is None:
-                    continue
-                try:
-                    mod_uuid = get_required_bg3_attribute(module_info, 'UUID')
-                    mod_folder = get_required_bg3_attribute(module_info, 'Folder')
-                    mod_name = get_required_bg3_attribute(module_info, 'Name')
-                    mod_short_name = mod_manager.make_mod_short_name(mod_name)
-                    mod_description = get_bg3_attribute(module_info, 'Description')
-                    if mod_description is None:
-                        mod_description = ''
-                    mod_author = get_bg3_attribute(module_info, 'Author')
-                    if mod_author is None:
-                        mod_author = 'Anonymous'
+        try:
+            content = pak_content(self.__assets, pak_path)
+            if content.meta_lsx is None:
+                self.add_to_report(f'Failed to process mod {pak_path}: meta.lsx is not found')
+            module_info = content.meta_lsx.find('./region[@id="Config"]/node[@id="root"]/children/node[@id="ModuleInfo"]')
+            if module_info is None:
+                self.add_to_report(f'Failed to process mod {pak_path}: ModuleInfo is not present in meta.lsx')
+            mod_uuid = get_required_bg3_attribute(module_info, 'UUID')
+            mod_folder = get_required_bg3_attribute(module_info, 'Folder')
+            mod_name = get_required_bg3_attribute(module_info, 'Name')
+            mod_short_name = mod_manager.make_mod_short_name(mod_name)
+            mod_description = get_bg3_attribute(module_info, 'Description')
+            if mod_description is None:
+                mod_description = ''
+            mod_author = get_bg3_attribute(module_info, 'Author')
+            if mod_author is None:
+                mod_author = 'Anonymous'
 
-                    if mod_uuid in self.__mods_index:
-                        modinfo = self.__mods_index[mod_uuid]
-                        modinfo.pak_path = pak_path
-                        modinfo.mod_files = mod_files
-                        modinfo.content = content
-                        modinfo.meta_lsx = meta_lsx_xml
-                        modinfo.mod_folder = mod_folder
-                        modinfo.mod_short_name = mod_short_name
-                        modinfo.mod_description = mod_description
-                        modinfo.mod_author = mod_author
-                    else:
-                        mod_name = get_required_bg3_attribute(module_info, 'Name')
-                        mod_version = mod_manager.__get_mod_version(module_info)
-                        modinfo = mod_info(mod_name, mod_uuid, mod_version, pak_path, mod_files, content, meta_lsx_xml, mod_description, mod_author, mod_folder, mod_short_name, False)
-                        self.__mods_index[mod_uuid] = modinfo
-                        self.__mods.append(modinfo)
-                except BaseException as exc:
-                    for l in traceback.format_exception(exc):
-                        print(l)
+            if mod_uuid in self.__mods_index:
+                modinfo = self.__mods_index[mod_uuid]
+                modinfo.pak_path = pak_path
+                modinfo.mod_files = content.files
+                modinfo.content = content
+                modinfo.meta_lsx = content.meta_lsx
+                modinfo.mod_folder = mod_folder
+                modinfo.mod_short_name = mod_short_name
+                modinfo.mod_description = mod_description
+                modinfo.mod_author = mod_author
+            else:
+                mod_name = get_required_bg3_attribute(module_info, 'Name')
+                mod_version = mod_manager.__get_mod_version(module_info)
+                modinfo = mod_info(mod_name, mod_uuid, mod_version, pak_path, content.files, content, content.meta_lsx, mod_description, mod_author, mod_folder, mod_short_name, False)
+                self.__mods_index[mod_uuid] = modinfo
+                self.__mods.append(modinfo)
+        except BaseException as exc:
+            self.add_to_report(f'Failed to process mod {pak_path}: {traceback.format_exc()}')
+
+    def __filter_out_mods(self) -> None:
+        mods_for_removal = list[mod_info]()
+        for mod in self.__mods:
+            if mod.content is None:
+                self.add_to_report(f'Skipped mod {mod.mod_name} {mod.mod_uuid} {mod.mod_version} because it has failed to load or it is a part of the vanilla game')
+                mods_for_removal.append(mod)
+                continue
+            guidance_lsx_path = f'Mods/{mod.mod_folder}/guidance.lsx'
+            if guidance_lsx_path in mod.mod_files:
+                self.add_to_report(f'Skipped mod {mod.mod_name} {mod.mod_uuid} {mod.mod_version} because Guidance created it')
+                mods_for_removal.append(mod)
+        for mod in mods_for_removal:
+            del self.__mods_index[mod.mod_uuid]
+            self.__mods.remove(mod)
+
+    def __create_guidance_node(self, settings: conflict_resolution_settings, method: conflict_resolution_method) -> None:
+        gf = self.__assets.files.add_new_file('Mods/ModName/guidance.lsx', is_mod_specific = True)
+        guidance_node = et.fromstring('<node id="Guidance"></node>')
+        set_bg3_attribute(guidance_node, 'Guidance', 'True', attribute_type = 'bool')
+        set_bg3_attribute(guidance_node, 'Type', method, attribute_type = 'LSString')
+        children_node = et.fromstring('<children></children>')
+        for mod_uuid in settings.priority_order:
+            mod_node = et.fromstring('<node id="ModReference"></node>')
+            set_bg3_attribute(mod_node, 'UUID', mod_uuid, attribute_type = 'guid')
+            children_node.append(mod_node)
+        guidance_node.append(children_node)
+        gf.xml.getroot().append(guidance_node)
+
 
     def resolve_conflicts(
             self,
@@ -481,6 +513,7 @@ class mod_manager:
                     src_path = self.unpack_mod(mi)
                     self.copy_mod_files(src_path, self.__assets.files.output_dir_path, mod_folder, mi.mod_uuid, progress_callback = progress_callback)
 
+            self.__create_guidance_node(settings, method)
             pak_path = self.__assets.files.build(verbose = False, preview = True, progress_callback = progress_callback)
 
             if settings.install_when_done:
@@ -500,6 +533,11 @@ class mod_manager:
 
             success = True
             return (True, 'Success')
+        except BaseException as exc:
+            self.add_to_report('An exception has been raised, see below.')
+            for line in traceback.format_exception(exc):
+                self.add_to_report(line)
+            raise RuntimeError('Conflict resolution failure') from exc
         finally:
             now = datetime.now()
             suffix = 'success' if success else 'failure'

@@ -587,7 +587,7 @@ class game_files:
         if verbose:
             sys.stdout.write('Generating the .pak file .')
         pak_file_name = self.__mod_name + '.pak'
-        pak_file = self.__tool.pack(self.output_dir_path, os.path.join(self.pak_path, pak_file_name))
+        pak_file = self.__tool.pack_deprecated(self.output_dir_path, os.path.join(self.pak_path, pak_file_name))
         if verbose:
             sys.stdout.write('.')
         md5 = hashlib.new('md5')
@@ -616,12 +616,11 @@ class game_files:
 
         return pak_file
 
-
-    def build_mod_io_pak(self) -> str:
+    def repack_mod(self) -> str:
         output_pak_path = os.path.join(self.pak_path, self.__mod_name + "_mod.io.pak")
         if os.path.isfile(output_pak_path):
             os.unlink(output_pak_path)
-        return self.__tool.pack(self.output_dir_path, output_pak_path)
+        return self.__tool.pack_deprecated(self.output_dir_path, output_pak_path)
 
     def get_mod_hash_and_version(self, pak_path: str) -> tuple[str, tuple[int, int, int, int]]:
         meta_lsx_path = self.__tool.unpack(pak_path, f'Mods/{self.__mod_name}/meta.lsx')

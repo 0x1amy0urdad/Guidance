@@ -8,6 +8,7 @@ import wx
 
 from ._guidance import (
     APP_NAME,
+    INITIALIZED,
     config,
     logger,
     guidance,
@@ -25,6 +26,15 @@ def main() -> int:
     logger.info(f'{APP_NAME} is starting up')
     app = wx.App()
     try:
+        if not INITIALIZED:
+            choice = wx.MessageBox(
+                'Cannot initialize Guidance due to missing .NET 8.0 runtime binaries.\n' \
+                'Click OK to open the download page.',
+                caption = APP_NAME,
+                style = wx.OK | wx.CANCEL | wx.CENTRE | wx.ICON_EXCLAMATION)
+            if choice == wx.OK:
+                os.startfile('https://dotnet.microsoft.com/en-us/download/dotnet/8.0')
+            return 0
         cfg = config()
         w = MainWindow(app, cfg, title = APP_NAME)
         if not cfg.bg3_exe_path or not os.path.isfile(cfg.bg3_exe_path):

@@ -11,18 +11,19 @@ from typing import Callable, cast
 from ._logger import logger
 
 
-VERSION = (0, 1, 0, 1)
+VERSION = (0, 1, 0, 2)
 DEFAULT_MOD_NAME = 'CompatibilityPatch'
 DEFAULT_MOD_UUID = '66553d67-3639-4530-babb-4535f3d61f04'
 
 APP_NAME = f'Guidance {VERSION[0]}.{VERSION[1]}.{VERSION[2]}.{VERSION[3]}'
+INITIALIZED = bg3.DOTNET_INITIALIZED
 
 class config:
     __env_root_path: str = ""
     __bg3_exe_path: str = ""
     __bg3_appdata_path: str = ""
-    __window_width: int = 640
-    __window_height: int = 480
+    __window_width: int = 1024
+    __window_height: int = 768
 
     def __init__(self) -> None:
         self.__bg3_exe_path = ""
@@ -124,8 +125,6 @@ class guidance:
         self.__cfg = cfg
         self.__env = guidance.create_env(cfg)
         self.__tool = bg3.bg3_modding_tool(self.__env)
-        if not self.__tool.sanity_check():
-           raise RuntimeError('Guidance failed sanity check, you may need to install .NET 8.0')
         self.__files = bg3.game_files(self.__tool, DEFAULT_MOD_NAME, DEFAULT_MOD_UUID)
         self.__assets = bg3.bg3_assets(self.__files)
         self.__index = self.__assets.index
@@ -171,7 +170,8 @@ class guidance:
             steam_library_path = f'{drive}:\\SteamLibrary'
             if os.path.exists(steam_library_path):
                 bg3_path = os.path.join(steam_library_path, 'steamapps', 'common', 'Baldurs Gate 3', 'bin', 'bg3.exe')
-                if os.path.isdir(bg3_path):
+                logger.info(f'Looking for BG3 at {bg3_path}')
+                if os.path.isfile(bg3_path):
                     logger.info(f'Successfully found BG3 at {bg3_path}')
                     return bg3_path
         logger.warning('Failed to locate BG3 location')

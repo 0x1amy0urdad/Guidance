@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import anthropic as a
 import decimal as dc
 import io
 import numpy as np
@@ -27,7 +26,10 @@ def decimal_from_str(val: str | dc.Decimal) -> dc.Decimal:
         while n < TIMELINE_PRECISION:
             val += '0'
             n += 1
-        return dc.Decimal(val)
+        try:
+            return dc.Decimal(val)
+        except Exception as exc:
+            raise RuntimeError(f'failed to convert: {val}') from exc
     raise TypeError(f'decimal_from_str() got an argument of an unexpected type: {type(val)}')
 
 
@@ -44,14 +46,17 @@ def decimal_from(val: str | dc.Decimal | float) -> dc.Decimal:
         while n < TIMELINE_PRECISION:
             val += '0'
             n += 1
-        return dc.Decimal(val)
+        try:
+            return dc.Decimal(val)
+        except Exception as exc:
+            raise RuntimeError(f'failed to convert: {val}') from exc
     return dc.Decimal(val).quantize(TIMELINE_DECIMAL_PRECISION)
 
 
 def decimal_to_str(val: dc.Decimal) -> str:
     if val.is_zero():
         return '0'
-    return str(val)
+    return f'{val:f}'
 
 
 TIMELINE_DECIMAL_PRECISION = dc.Decimal('0.' + '0' * (TIMELINE_PRECISION - 1) + '1')
@@ -85,27 +90,55 @@ def get_len(iter: Any) -> int:
         return iter.__len__()
     raise RuntimeError("Cannot determine lenght of an object")
 
-
-def get_bg3_attribute(node: et.Element, attribute_name: str, /, value_name: str | None = None) -> str | None:
+def get_bg3_attribute(node: et.Element[str], attribute_name: str, /, value_name: str | None = None) -> str | None:
     attribute_node = node.find(f'./attribute[@id="{attribute_name}"]')
     if attribute_node is None:
         return None
+    if len(attribute_node) == 1:
+        return ' '.join(get_lsx_vector_attribute(attribute_node))
     effective_value_name = "value" if value_name is None else value_name
     return attribute_node.get(effective_value_name)
 
-
-def get_required_bg3_attribute(node: et.Element, attribute_name: str, /, value_name: str | None = None) -> str:
+def get_required_bg3_attribute(node: et.Element[str], attribute_name: str, /, value_name: str | None = None) -> str:
     attribute_node = node.find(f'./attribute[@id="{attribute_name}"]')
     if attribute_node is None:
         raise ValueError(f"required BG3 attribute {attribute_name} doesn't exist")
     effective_value_name = "value" if value_name is None else value_name
     value = attribute_node.get(effective_value_name)
     if value is None:
+        if len(attribute_node) == 1:
+            return ' '.join(get_lsx_vector_attribute(attribute_node))
         raise ValueError(f"required BG3 attribute {attribute_name} doesn't have a value")
     return value
 
+def get_lsx_vector_attribute(attribute_node: et.Element[str]) -> tuple[str, ...]:
+    if len(attribute_node) == 1:
+        inner_node = attribute_node[0]
+        if inner_node.tag == 'fvec2':
+            x = inner_node.get('x')
+            y = inner_node.get('y')
+            if x is None or y is None:
+                raise ValueError(f'unexpected None value: {to_compact_string(attribute_node)}')
+            return (x, y)
+        if inner_node.tag == 'fvec3':
+            x = inner_node.get('x')
+            y = inner_node.get('y')
+            z = inner_node.get('z')
+            if x is None or y is None or z is None:
+                raise ValueError(f'unexpected None value: {to_compact_string(attribute_node)}')
+            return (x, y, z)
+        if inner_node.tag == 'fvec4':
+            x = inner_node.get('x')
+            y = inner_node.get('y')
+            z = inner_node.get('z')
+            w = inner_node.get('w')
+            if x is None or y is None or z is None or w is None:
+                raise ValueError(f'unexpected None value: {to_compact_string(attribute_node)}')
+            return (x, y, z, w)
+    raise RuntimeError(f'unexpected element: {to_compact_string(attribute_node)}, expected a fvec2 | fvec3 | fvec4 node')
 
-def get_bg3_handle_attribute(node: et.Element, attribute_name: str, /, value_name: str | None = None) -> tuple[str, int]:
+
+def get_bg3_handle_attribute(node: et.Element[str], attribute_name: str, /, value_name: str | None = None) -> tuple[str, int]:
     attribute_node = node.find(f'./attribute[@id="{attribute_name}"]')
     if attribute_node is None:
         raise ValueError(f"required BG3 attribute {attribute_name} doesn't exist")
@@ -120,12 +153,13 @@ def get_bg3_handle_attribute(node: et.Element, attribute_name: str, /, value_nam
 
 
 def set_bg3_attribute(
-        node: et.Element,
+        node: et.Element[str],
         attribute_name: str,
         attribute_value: str | float | int,
         /,
         attribute_type: str = "",
-        version: int | None = None
+        version: int | None = None,
+        lsx: bool  = False
     ) -> None:
     attribute_node = node.find(f'./attribute[@id="{attribute_name}"]')
     if isinstance(attribute_value, float):
@@ -139,48 +173,101 @@ def set_bg3_attribute(
     if attribute_node is None:
         if not attribute_type:
             raise ValueError(f"attribute type is required to create a new attribute {attribute_name}")
-        if version is not None:
-            attribute_node = et.fromstring(f'<attribute id="{attribute_name}" type="{attribute_type}" handle="{value}" version="{version}" />')
+        if lsx and attribute_type in {'fvec2', 'fvec3', 'fvec4'}:
+            values = value.split(' ')
+            if attribute_type == 'fvec2':
+                if len(values) != 2:
+                    raise RuntimeError(f'expected two numbers, got {attribute_value}')
+                attribute_node = et.fromstring(
+                    f'<attribute id="{attribute_name}" type="fvec2">' +
+                    f'<float2 x="{values[0]}" y="{values[1]}" /></attribute>')
+            elif attribute_type == 'fvec3':
+                if len(values) != 3:
+                    raise RuntimeError(f'expected three numbers, got {attribute_value}')
+                attribute_node = et.fromstring(
+                    f'<attribute id="{attribute_name}" type="fvec3">' +
+                    f'<float3 x="{values[0]}" y="{values[1]} z="{values[2]}" /></attribute>')
+            elif attribute_type == 'fvec4':
+                if len(values) != 4:
+                    raise RuntimeError(f'expected four numbers, got {attribute_value}')
+                attribute_node = et.fromstring(
+                    f'<attribute id="{attribute_name}" type="fvec4">' +
+                    f'<float4 x="{values[0]}" y="{values[1]} z="{values[2]}" w="{values[3]}" /></attribute>')
         else:
-            attribute_node = et.fromstring(f'<attribute id="{attribute_name}" type="{attribute_type}" value="{value}" />')
+            if version is not None:
+                attribute_node = et.fromstring(f'<attribute id="{attribute_name}" type="{attribute_type}" handle="{value}" version="{version}" />')
+            else:
+                attribute_node = et.fromstring(f'<attribute id="{attribute_name}" type="{attribute_type}" value="{value}" />')
         node.append(attribute_node)
     else:
         if attribute_type:
-            attribute_node.set("type", attribute_type)
-        if version is None:
-            attribute_node.set("value", value)
+            attribute_node.set('type', attribute_type)
         else:
-            attribute_node.set("handle", str(attribute_value))
-            attribute_node.set("version", str(version))
+            attribute_type = attribute_node.get('type')
+        if lsx and attribute_type in {'fvec2', 'fvec3', 'fvec4'}:
+            values = value.split(' ')
+            if attribute_type == 'fvec2':
+                if len(values) != 2:
+                    raise RuntimeError(f'expected two numbers, got {attribute_value}')
+                inner_node = attribute_node[0]
+                if inner_node.tag != 'float2':
+                    raise RuntimeError(f'expected float2 node, got {to_compact_string(attribute_node)}')
+                inner_node.set('x', values[0])
+                inner_node.set('y', values[1])
+            elif attribute_type == 'fvec3':
+                if len(values) != 3:
+                    raise RuntimeError(f'expected three numbers, got {attribute_value}')
+                inner_node = attribute_node[0]
+                if inner_node.tag != 'float3':
+                    raise RuntimeError(f'expected float3 node, got {to_compact_string(attribute_node)}')
+                inner_node.set('x', values[0])
+                inner_node.set('y', values[1])
+                inner_node.set('z', values[2])
+            elif attribute_type == 'fvec4':
+                if len(values) != 4:
+                    raise RuntimeError(f'expected four numbers, got {attribute_value}')
+                inner_node = attribute_node[0]
+                if inner_node.tag != 'float4':
+                    raise RuntimeError(f'expected float4 node, got {to_compact_string(attribute_node)}')
+                inner_node.set('x', values[0])
+                inner_node.set('y', values[1])
+                inner_node.set('z', values[2])
+                inner_node.set('w', values[3])
+        else:
+            if version is None:
+                attribute_node.set('value', value)
+            else:
+                attribute_node.set('handle', str(attribute_value))
+                attribute_node.set('version', str(version))
 
 
-def delete_bg3_attribute(node: et.Element, attribute_name: str) -> None:
+def delete_bg3_attribute(node: et.Element[str], attribute_name: str) -> None:
     attribute_node = node.find(f'./attribute[@id="{attribute_name}"]')
     if attribute_node is None:
         raise ValueError(f"BG3 attribute {attribute_name} doesn't exist")
     node.remove(attribute_node)
 
 
-def has_bg3_attribute(node: et.Element, attribute_name: str) -> bool:
+def has_bg3_attribute(node: et.Element[str], attribute_name: str) -> bool:
     return node.find(f'./attribute[@id="{attribute_name}"]') is not None
 
 
-def get_required_attribute(node: et.Element, attribute_name: str) -> str:
+def get_required_attribute(node: et.Element[str], attribute_name: str) -> str:
     result = node.get(attribute_name)
     if result is None:
         raise ValueError(f"required attribute {attribute_name} doesn't exist")
     return result
 
 
-def lower_bound_by_node_attribute(nodes: list[et.Element], attribute_name: str, target_value: str) -> int:
+def lower_bound_by_node_attribute(nodes: list[et.Element[str]], attribute_name: str, target_value: str) -> int:
     return lower_bound(nodes, lambda node: get_required_attribute(node, attribute_name), target_value)
 
 
-def lower_bound_by_bg3_attribute(nodes: list[et.Element], attribute_name: str, target_value: str) -> int:
+def lower_bound_by_bg3_attribute(nodes: list[et.Element[str]], attribute_name: str, target_value: str) -> int:
     return lower_bound(nodes, lambda node: get_required_bg3_attribute(node, attribute_name), target_value)
 
 
-def lower_bound(nodes: list[et.Element], attribute_getter: Callable[[et.Element], str], target_value: str) -> int:
+def lower_bound(nodes: list[et.Element[str]], attribute_getter: Callable[[et.Element[str]], str], target_value: str) -> int:
     top = len(nodes)
     if top <= 1:
         return 0
@@ -209,7 +296,7 @@ def lower_bound(nodes: list[et.Element], attribute_getter: Callable[[et.Element]
     raise RuntimeError(f"Failed to find the lower bound for {target_value}")
 
 
-def find_object_by_map_key(target: et.Element, key: str) -> et.Element | None:
+def find_object_by_map_key(target: et.Element[str], key: str) -> et.Element | None:
     objs = target.findall('./children/node[@id="Object"]')
     for obj in objs:
         obj_key = get_required_bg3_attribute(obj, 'MapKey')
@@ -218,7 +305,7 @@ def find_object_by_map_key(target: et.Element, key: str) -> et.Element | None:
     return None
 
 
-def put_object_into_map(target: et.Element, obj: et.Element) -> None:
+def put_object_into_map(target: et.Element[str], obj: et.Element[str]) -> None:
     obj_key = get_required_bg3_attribute(obj, 'MapKey')
     children = target.find('./children')
     if children is None:
@@ -232,9 +319,9 @@ def put_object_into_map(target: et.Element, obj: et.Element) -> None:
     children.append(obj)
 
 
-def remove_object_by_map_key(target: et.Element, key: str) -> None:
+def remove_object_by_map_key(target: et.Element[str], key: str) -> None:
     children = target.find('./children')
-    if not isinstance(children, et.Element):
+    if not isinstance(children, et.Element[str]):
         raise KeyError(f"object '{key}' doesn't exist in the map")
     existing_obj = find_object_by_map_key(target, key)
     if existing_obj is None:
@@ -242,7 +329,7 @@ def remove_object_by_map_key(target: et.Element, key: str) -> None:
     children.remove(existing_obj)
 
 
-def get_or_create_child_node(parent_node: et.Element, chlild_node_id: str) -> et.Element:
+def get_or_create_child_node(parent_node: et.Element[str], chlild_node_id: str) -> et.Element[str]:
     children = parent_node.find('./children')
     if children is None:
         result = et.fromstring(f'<node id="{chlild_node_id}"></node>')
@@ -294,7 +381,7 @@ def print_and_write(f: io.TextIOWrapper, s: str | list[str]) -> None:
         raise TypeError()
 
 
-def euler_to_quaternion(x_deg: float, y_deg: float, z_deg: float, sequence: str = 'xyz') -> tuple[float, float, float, float]:
+def euler_to_quaternion(x_deg: float, y_deg: float, z_deg: float, sequence: str = 'yxz') -> tuple[float, float, float, float]:
     a1 = np.deg2rad(x_deg)
     a2 = np.deg2rad(y_deg)
     a3 = np.deg2rad(z_deg)

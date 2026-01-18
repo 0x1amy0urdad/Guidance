@@ -124,11 +124,11 @@ class gossips_object:
         if conditions_node is None:
             children_node = g.find('./children')
             if children_node is None:
-                g.append(et.fromstring('<children><children>'))
+                g.append(et.fromstring('<children></children>'))
                 children_node = g.find('./children')
                 if children_node is None:
                     raise RuntimeError()
-            children_node.append(et.fromstring(f'<node id=""><children></children></node>'))
+            children_node.append(et.fromstring(f'<node id="ConditionFlags"><children></children></node>'))
             conditions_node = children_node.find('./node[@id="ConditionFlags"]/children')
             if conditions_node is None:
                 raise RuntimeError()
