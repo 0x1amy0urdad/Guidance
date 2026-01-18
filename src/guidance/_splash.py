@@ -35,8 +35,10 @@ import wx
 
 class SplashScreen:
     __splash_screen: wx.Frame
+    __sizer: wx.BoxSizer
     __static_bitmap: wx.StaticBitmap
     __original_bitmap: wx.Bitmap
+    __status: wx.StaticText
     __visible: bool
 
     def __init__(self) -> None:
@@ -50,6 +52,14 @@ class SplashScreen:
         #self.__splash_screen = wx.Frame(None, style = wx.FRAME_NO_TASKBAR | wx.STAY_ON_TOP | wx.BORDER_STATIC)
         self.__splash_screen = wx.Frame(None, style = wx.BORDER_STATIC)
         self.__static_bitmap = wx.StaticBitmap(self.__splash_screen, bitmap = wx.BitmapBundle.FromBitmap(self.__original_bitmap))
+        self.__status = wx.StaticText(self.__splash_screen, label = 'Loading...')
+        self.__sizer = wx.BoxSizer(wx.VERTICAL)
+        self.__sizer.Add(self.__static_bitmap, proportion = 1)
+        self.__sizer.Add(self.__status, proportion = 0, flag = wx.EXPAND | wx.ALL, border = 5)
+        self.__splash_screen.SetSizerAndFit(self.__sizer)
+        self.__splash_screen.SetBackgroundColour(wx.Colour(0, 0, 0))
+        self.__status.SetForegroundColour(wx.Colour(255, 255, 255))
+        self.__status.SetBackgroundColour(wx.Colour(0, 0, 0))
         self.__visible = False
 
     @property
@@ -58,43 +68,43 @@ class SplashScreen:
 
     def show_splash_screen(self) -> None:
         self.__splash_screen.SetDoubleBuffered(True)
-        self.__splash_screen.Fit()
+        # self.__splash_screen.Fit()
         self.__splash_screen.Centre()
         self.__splash_screen.Show()
-        
-        self.update_status("Loading...")
+        self.__status.SetLabel("Loading...")
         self.__visible = True
 
     def update_status(self, message: str) -> None:
         wx.CallAfter(self.__update_status, message)
 
     def __update_status(self, message: str) -> None:
-        self.__splash_screen.Freeze()
-        try:
-            bitmap = self.__original_bitmap.ConvertToImage().ConvertToBitmap()
-            dc = wx.MemoryDC(bitmap)
-            dc.SetFont(wx.Font(10, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_LIGHT))
-            dc.SetTextForeground(wx.WHITE)
-            dc.SetTextBackground(wx.BLACK)
+        self.__status.SetLabel(message)
+        # self.__splash_screen.Freeze()
+        # try:
+        #     bitmap = self.__original_bitmap.ConvertToImage().ConvertToBitmap()
+        #     dc = wx.MemoryDC(bitmap)
+        #     dc.SetFont(wx.Font(10, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_LIGHT))
+        #     dc.SetTextForeground(wx.WHITE)
+        #     dc.SetTextBackground(wx.BLACK)
 
-            while True:        
-                text_width, text_height = dc.GetTextExtent(message)
-                if text_width > 540:
-                    n = len(message) - 6
-                    message = message[:n] + '...'
-                else:
-                    break
-            x = 15
-            y = int(bitmap.GetHeight() - text_height - 10)
+        #     while True:        
+        #         text_width, text_height = dc.GetTextExtent(message)
+        #         if text_width > 540:
+        #             n = len(message) - 6
+        #             message = message[:n] + '...'
+        #         else:
+        #             break
+        #     x = 15
+        #     y = int(bitmap.GetHeight() - text_height - 10)
             
-            dc.DrawText(message, x, y)
-            dc.SelectObject(wx.NullBitmap)
+        #     dc.DrawText(message, x, y)
+        #     dc.SelectObject(wx.NullBitmap)
             
-            self.__static_bitmap.SetBitmap(bitmap)
-            self.__splash_screen.Refresh()
-        finally:
-            self.__splash_screen.Thaw()
-        wx.SafeYield()
+        #     self.__static_bitmap.SetBitmap(bitmap)
+        #     self.__splash_screen.Refresh()
+        # finally:
+        #     self.__splash_screen.Thaw()
+        # wx.SafeYield()
 
     def hide_splash_screen(self) -> None:
         self.__splash_screen.Destroy()

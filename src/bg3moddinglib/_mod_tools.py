@@ -454,7 +454,7 @@ class mod_manager:
                     20000000,
                     '15f1afd547fbd0ac70a98c2432c10868')
 
-            self.add_to_report(f'result mod name = {mod_name}, mod uuid = {mod_uuid}')
+            self.add_to_report(f'result mod name = {mod_name}, mod uuid = {mod_uuid}, mod folder = {f.mod_name}')
 
             self.__assets = bg3_assets(f)
             self.__conflicting_files.clear()
@@ -523,13 +523,13 @@ class mod_manager:
                     for mod_uuid in settings.priority_order:
                         self.uninstall_mod(mod_uuid)
                     self.install_mod(pak_path)
-                appdata_path = find_bg3_appdata_path()
-                if appdata_path is not None:
-                    os.startfile(os.path.join(appdata_path, 'Mods'))
-                else:
-                    os.startfile(os.path.dirname(pak_path))
-            else:
-                os.startfile(os.path.dirname(pak_path))
+            #     appdata_path = find_bg3_appdata_path()
+            #     if appdata_path is not None:
+            #         os.startfile(os.path.join(appdata_path, 'Mods'))
+            #     else:
+            #         os.startfile(os.path.dirname(pak_path))
+            # else:
+            #     os.startfile(os.path.dirname(pak_path))
 
             success = True
             return (True, 'Success')
@@ -889,6 +889,9 @@ class mod_manager:
         result_timeline_resource: XmlElement | None = None
         changed_phases = set[str]()
 
+        result_scene_file_lsf: game_file | None = None
+        result_scene_file_lsx: game_file | None = None
+
         d_differ = dialog_differ(self.__assets)
         t_differ = timeline_differ(self.__assets)
         for modinfo in mods:
@@ -907,11 +910,11 @@ class mod_manager:
                         result_dialog_resource = self.get_dialog_resource(dialog_uuid, modcontent)
                         dialog_nodes_diff = d_differ.get_modified_dialog_nodes(result_dialog, dialog_uuid)
                         root_nodes_diff = d_differ.get_modified_dialog_root_nodes(result_dialog, dialog_uuid)
-                    else:
-                        self.add_to_report(f'baseline dialog {dialog_name} is taken from the vanilla game')
-                        result_dialog = self.__assets.get_dialog_object(dialog_uuid)
-                        result_dialog_resource = self.__assets.get_dialog_resource(dialog_uuid)
-                        result_dialog.dialog_file.is_mod_specific = True
+                    # else:
+                    #     self.add_to_report(f'baseline dialog {dialog_name} is taken from the vanilla game')
+                    #     result_dialog = self.__assets.get_dialog_object(dialog_uuid)
+                    #     result_dialog_resource = self.__assets.get_dialog_resource(dialog_uuid)
+                    #     result_dialog.dialog_file.is_mod_specific = True
                 else:
                     # the next conflicting dialog object
                     cb = modcontent.get_content_bundle(dialog_uuid)
@@ -940,18 +943,17 @@ class mod_manager:
                         for diff_state in timeline_nodes_diff.values():
                             phase_uuid = diff_state.split('|')[1]
                             changed_phases.add(phase_uuid)
-                    else:
-                        self.add_to_report(f'baseline timeline {timeline_name} is taken from the vanilla game')
-                        result_timeline = self.__assets.get_timeline_object(dialog_uuid)
-                        result_timeline_resource = self.__assets.get_timeline_resource(cb.timeline_uuid)
-                        result_timeline.timeline_file.is_mod_specific = True
+                    # else:
+                    #     self.add_to_report(f'baseline timeline {timeline_name} is taken from the vanilla game')
+                    #     result_timeline = self.__assets.get_timeline_object(dialog_uuid)
+                    #     result_timeline_resource = self.__assets.get_timeline_resource(cb.timeline_uuid)
+                    #     result_timeline.timeline_file.is_mod_specific = True
                 else:
                     # the next conflicting timeline object
                     cb = modcontent.get_content_bundle(dialog_uuid)
                     if cb.timeline_file:
                         self.add_to_report(f'merging timeline {timeline_name} from mod {modinfo.mod_short_name} [{mod_uuid}]')
                         self.append_to_exclusion_list(mod_uuid, cb.timeline_file)
-                        self.append_to_exclusion_list(mod_uuid, cb.timeline_file.replace('.lsf', '_Scene.lsf'))
                         gf = game_file(self.__assets.tool, cb.timeline_file, pak_name=modinfo.pak_path)
                         if result_dialog:
                             d = result_dialog
@@ -961,19 +963,85 @@ class mod_manager:
                         timeline_nodes_diff = t_differ.get_modified_timeline_nodes(modded_timeline, dialog_uuid)
                         self.merge_timeline_nodes(dialog_uuid, result_timeline, changed_phases, modded_timeline, timeline_nodes_diff)
 
+                # Take the scene file from the top priority mod
+                # Resolution of scene conflicts is not supported yet
+                if result_scene_file_lsf is None and cb.scene_lsf_file:
+                    result_scene_file_lsf = game_file(self.__assets.tool, cb.scene_lsf_file, pak_name = modinfo.pak_path, mod_specific = True)
+                    self.append_to_exclusion_list(mod_uuid, cb.scene_lsf_file)
+                if result_scene_file_lsx is None and cb.scene_lsx_file:
+                    result_scene_file_lsx = game_file(self.__assets.tool, cb.scene_lsx_file, pak_name = modinfo.pak_path, mod_specific = True)
+                    self.append_to_exclusion_list(mod_uuid, cb.scene_lsx_file)
+
+
+        if result_dialog is None and result_timeline is None:
+            self.add_to_report(f'unexpected: both dialog and timeline are None after resolution for dialog uuid {dialog_uuid}')
+            self.add_to_report(f'mods: {','.join([m.mod_short_name + m.mod_uuid for m in mods])}')
+            return
+
+        vanilla_name = None
+        if self.__assets.index.has_entry(dialog_uuid):
+            vanilla_relative_path = self.__assets.index.get_entry(dialog_uuid)['lsf_path']
+            n1 = vanilla_relative_path.rfind('/')
+            n2 = vanilla_relative_path.rfind('.')
+            if n1 == -1 or n2 == -1:
+                raise ValueError(f'Bad lsf_path {vanilla_relative_path}, dialog uuid = {dialog_uuid}')
+            vanilla_name = vanilla_relative_path[n1 + 1 : n2]
+
+        # Make sure the names match
+        if result_dialog is not None and result_timeline is not None:
+            if vanilla_name:
+                new_name = '_'.join([self.__assets.files.mod_name, vanilla_name])
+            else:
+                n1 = result_dialog.dialog_file.relative_file_path.rfind('/')
+                n2 = result_dialog.dialog_file.relative_file_path.rfind('.')
+                if n1 == -1 or n2 == -1:
+                    raise ValueError(f'Bad lsf_path {result_dialog.dialog_file.relative_file_path}, dialog uuid = {dialog_uuid}')
+                file_name = result_dialog.dialog_file.relative_file_path[n1 + 1 : n2]
+                new_name = '_'.join([self.__assets.files.mod_name, file_name])
+            result_dialog.dialog_file.rename_to = new_name
+            result_timeline.timeline_file.rename_to = new_name
+            # Rename scene files to match timeline and dialog names
+            if result_scene_file_lsf is not None:
+                result_scene_file_lsf.rename_to = new_name + '_Scene'
+            if result_scene_file_lsx is not None:
+                result_scene_file_lsx.rename_to = new_name + '_Scene'
+        elif vanilla_name:
+            if result_dialog is not None and result_timeline is None:
+                result_dialog.dialog_file.rename_to = vanilla_name
+            elif result_dialog is None and result_timeline is not None:
+                result_timeline.timeline_file.rename_to = vanilla_name
+                # Rename scene files to match timeline and dialog names
+                if result_scene_file_lsf is not None:
+                    result_scene_file_lsf.rename_to = vanilla_name + '_Scene'
+                if result_scene_file_lsx is not None:
+                    result_scene_file_lsx.rename_to = vanilla_name + '_Scene'
+
         if result_dialog is not None:
+            result_dialog.dialog_file.is_mod_specific = True
             self.__assets.files.add(result_dialog.dialog_file)
-            self.add_to_report(f'added dialog {dialog_name} to the build, file name {result_dialog.dialog_file.relative_file_path}')
-        if result_dialog_resource is not None:
-            self.__assets.add_to_dialog_bank(result_dialog_resource)
-            self.add_to_report(f'added dialog {dialog_name} to the dialog bank')
+            self.add_to_report(f'added dialog {dialog_name} to the build, file name {result_dialog.dialog_file.relative_file_path}, output file name {result_dialog.dialog_file.get_output_relative_path(self.__assets.files)}')
+            if result_dialog_resource is not None:
+                self.__assets.add_to_dialog_bank(result_dialog_resource, result_dialog.dialog_file)
+                self.add_to_report(f'added dialog {dialog_name} to the dialog bank, dialog uuid = {dialog_uuid}')
+            else:
+                self.add_to_report(f'unexpected: dialog resource for {dialog_name} is None, dialog uuid = {dialog_uuid}')
         if result_timeline is not None:
+            result_timeline.timeline_file.is_mod_specific = True
             self.__assets.files.add(result_timeline.timeline_file)
-            self.add_to_report(f'added timeline {timeline_name} to the build, file name {result_timeline.timeline_file.relative_file_path}')
-        if result_timeline_resource is not None:
-            self.__assets.add_to_timeline_bank(result_timeline_resource)
-            self.add_to_report(f'added timeline {timeline_name} to the timeline bank')
-        self.add_to_report(f'finished resolving conflicts in dialog {dialog_name} and timeline {timeline_name}')
+            self.add_to_report(f'added timeline {timeline_name} to the build, file name {result_timeline.timeline_file.relative_file_path}, output file name {result_timeline.timeline_file.get_output_relative_path(self.__assets.files)}')
+            if result_timeline_resource is not None:
+                self.__assets.add_to_timeline_bank(result_timeline_resource, result_timeline.timeline_file)
+                self.add_to_report(f'added timeline {timeline_name} to the timeline bank')
+            else:
+                self.add_to_report(f'unexpected: timeline resource for {timeline_name} is None, dialog uuid = {dialog_uuid}')
+        if result_scene_file_lsf is not None:
+            self.__assets.files.add(result_scene_file_lsf)
+            self.add_to_report(f'added scene file for {timeline_name} to the build, file name {result_scene_file_lsf.relative_file_path}, output file name {result_scene_file_lsf.get_output_relative_path(self.__assets.files)}')
+        if result_scene_file_lsx is not None:
+            self.__assets.files.add(result_scene_file_lsx)
+            self.add_to_report(f'added scene file for {timeline_name} to the build, file name {result_scene_file_lsx.relative_file_path}, output file name {result_scene_file_lsx.get_output_relative_path(self.__assets.files)}')
+
+        self.add_to_report(f'finished resolving conflicts in dialog {dialog_name} and timeline {timeline_name}, dialog uuid = {dialog_uuid}')
 
 
     def get_dialog_resource(self, dialog_uuid: str, content: pak_content) -> XmlElement:

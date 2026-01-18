@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import bg3moddinglib as bg3
-import sys
+import os
 import wx
 import wx.lib.scrolledpanel as scrolled
 
 from typing import Callable, cast
+from uuid import uuid4
 
 from ._guidance import APP_NAME, config, guidance
 from ._logger import logger
@@ -20,6 +21,8 @@ class MainWindow(wx.Frame):
     ID_BTN_SHOW_ALL_MODS = wx.NewId()
     ID_BTN_MERGE = wx.NewId()
     ID_BTN_PATCH = wx.NewId()
+    ID_BTN_OUTPUT = wx.NewId()
+    ID_BTN_MODS = wx.NewId()
     ID_BTN_ABOUT = wx.NewId()
     ID_CONFLICT_LIST = wx.NewId()
 
@@ -70,6 +73,7 @@ class MainWindow(wx.Frame):
     __conflict_resolution_sizer: wx.BoxSizer
     __merge_button: wx.Button
     __patch_button: wx.Button
+    __output_button: wx.Button
     __about_button: wx.Button
 
     def __init__(self, app: wx.App, cfg: config, *args, **kwargs) -> None:
@@ -85,7 +89,7 @@ class MainWindow(wx.Frame):
         self.__show_all_mods = False
         self.__conflicts_detected = False
 
-        self.SetMinSize(wx.Size(640, 480))
+        self.SetMinSize(wx.Size(1024, 768))
         self.SetSize(cfg.window_width, cfg.window_height)
     
         self.__mod_priorities_labels = list[wx.StaticText]()
@@ -133,12 +137,16 @@ class MainWindow(wx.Frame):
         self.__right_bottom_panel = wx.Panel(self.__right_panel)
         self.__right_bottom_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.__merge_button = wx.Button(self.__right_bottom_panel, label = 'Merge mods (and resolve conflicts)', id = MainWindow.ID_BTN_MERGE)
-        self.__patch_button = wx.Button(self.__right_bottom_panel, label = 'Create compatibility patch', id = MainWindow.ID_BTN_PATCH)
-        self.__about_button = wx.Button(self.__right_bottom_panel, label = 'About this tool', id = MainWindow.ID_BTN_ABOUT)
+        self.__merge_button = wx.Button(self.__right_bottom_panel, label = 'Merge', id = MainWindow.ID_BTN_MERGE)
+        self.__patch_button = wx.Button(self.__right_bottom_panel, label = 'Patch', id = MainWindow.ID_BTN_PATCH)
+        self.__output_button = wx.Button(self.__right_bottom_panel, label = 'Output', id = MainWindow.ID_BTN_OUTPUT)
+        self.__mods_button = wx.Button(self.__right_bottom_panel, label = 'Mods', id = MainWindow.ID_BTN_MODS)
+        self.__about_button = wx.Button(self.__right_bottom_panel, label = 'About', id = MainWindow.ID_BTN_ABOUT)
 
         self.__right_bottom_sizer.Add(self.__merge_button, proportion = 1, flag = wx.EXPAND | wx.ALL, border = 5)
         self.__right_bottom_sizer.Add(self.__patch_button, proportion = 1, flag = wx.EXPAND | wx.ALL, border = 5)
+        self.__right_bottom_sizer.Add(self.__output_button, proportion = 1, flag = wx.EXPAND | wx.ALL, border = 5)
+        self.__right_bottom_sizer.Add(self.__mods_button, proportion = 1, flag = wx.EXPAND | wx.ALL, border = 5)
         self.__right_bottom_sizer.Add(self.__about_button, proportion = 1, flag = wx.EXPAND | wx.ALL, border = 5)
 
         self.__right_bottom_panel.SetSizer(self.__right_bottom_sizer)
@@ -219,6 +227,11 @@ class MainWindow(wx.Frame):
             else:
                 message = 'Guidance was successful.'
             wx.MessageBox(message, caption = 'Guidance', style = wx.ICON_INFORMATION | wx.OK | wx.CENTER, parent = self)
+            if self.__g:
+                os.startfile(self.__g.env.output_path)
+                appdata_path = guidance.find_bg3_appdata_path()
+                if appdata_path:
+                    os.startfile(os.path.join(appdata_path, 'Mods'))
 
     #
     # UI events
@@ -253,6 +266,7 @@ class MainWindow(wx.Frame):
     def on_close(self, event: wx.Event) -> None:
         logger.info('Main window is closing')
         self.__config.save_config()
+        self.__runner.stop()
         event.Skip()
 
     def on_button(self, event: wx.CommandEvent) -> None:
@@ -297,6 +311,21 @@ class MainWindow(wx.Frame):
             return
         if event.GetId() == MainWindow.ID_BTN_PATCH:
             self.__resolve_conflicts(bg3.conflict_resolution_method.PATCH)
+            event.StopPropagation()
+            return
+        if event.GetId() == MainWindow.ID_BTN_OUTPUT:
+            if self.__g:
+                os.startfile(self.__g.env.output_path)
+            else:
+                wx.MessageBox('Cannot find the output path :(', APP_NAME, style = wx.ICON_ERROR | wx.OK | wx.CENTER, parent = self)
+            event.StopPropagation()
+            return
+        if event.GetId() == MainWindow.ID_BTN_MODS:
+            appdata_path = guidance.find_bg3_appdata_path()
+            if appdata_path:
+                os.startfile(os.path.join(appdata_path, 'Mods'))
+            else:
+                wx.MessageBox('Cannot find the AppData path :(', APP_NAME, style = wx.ICON_ERROR | wx.OK | wx.CENTER, parent = self)
             event.StopPropagation()
             return
         if event.GetId() == MainWindow.ID_BTN_ABOUT:
@@ -540,6 +569,7 @@ class MainWindow(wx.Frame):
             conflict_index = cast(int, i)
             chosen_conflicts.append(conflict_index)
 
+        mod_names = list[str]()
         added_mod_uuids = set[str]()
         for choice in self.__mod_priorities_choices:
             choice_idx = choice.GetSelection()
@@ -555,15 +585,30 @@ class MainWindow(wx.Frame):
                 return 'Duplicates are in the mod priority list.'
             mod_priority_order.append(mod_uuid)
             added_mod_uuids.add(mod_uuid)
+            mod_names.append(mod_name[: pos1].replace(' ', ''))
 
         mi = self.__g.mod_manager.get_mod_info(mod_priority_order[0])
-        default_metadata = {
-            'mod_display_name': mi.mod_name,
-            'mod_description': mi.mod_description,
-            'mod_uuid': mi.mod_uuid,
-            'mod_author': mi.mod_author,
-            'mod_version': f'{mi.mod_version[0]}.{mi.mod_version[1]}.{mi.mod_version[2]}.{mi.mod_version[3]}'
-        }
+        if method == bg3.conflict_resolution_method.PATCH:
+            patch_name = f'Compatibility Patch'
+            patch_description = f'Compatibility Patch for: {', '.join(mod_names)}'
+            if len(patch_description) > 249:
+                patch_description = patch_description[:249]
+            default_metadata = {
+                'mod_display_name': patch_name,
+                'mod_description': patch_description,
+                'mod_uuid': str(uuid4()),
+                'mod_author': 'Anonymous',
+                'mod_version': f'1.0.0.0'
+            }
+        else:
+            default_metadata = {
+                'mod_display_name': mi.mod_name,
+                'mod_description': mi.mod_description,
+                'mod_uuid': mi.mod_uuid,
+                'mod_author': mi.mod_author,
+                'mod_version': f'{mi.mod_version[0]}.{mi.mod_version[1]}.{mi.mod_version[2]}.{mi.mod_version[3]}'
+            }
+
         dlg = ModMetadataDialog(self, default_metadata, method)
         dlg_choice = dlg.ShowModal()
         if dlg_choice != wx.ID_OK:

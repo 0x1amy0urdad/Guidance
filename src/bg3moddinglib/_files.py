@@ -53,6 +53,7 @@ class game_file:
         self.__mod_specific = mod_specific
         self.__rename_to = rename_to
         self.__xml = None
+        file_path = file_path.replace('\\', '/')
         if pak_name is not None:
             self.__source_pak = pak_name
             self.__relative_file_path = file_path
@@ -174,8 +175,12 @@ class game_file:
     def rename_to(self) -> str:
         return self.__rename_to
 
-    def get_output_relative_path(self, mod_name: str) -> str:
-        parts = self.__relative_file_path.replace("\\", "/").split("/")
+    @rename_to.setter
+    def rename_to(self, val: str) -> None:
+        self.__rename_to = val
+
+    def get_output_relative_path(self, files: game_files) -> str:
+        parts = self.__relative_file_path.split("/")
         n = len(parts)
         if self.__rename_to:
             s = parts[n - 1]
@@ -185,7 +190,7 @@ class game_file:
             ext = s[pos:]
             parts[n - 1] = self.__rename_to + ext
         if self.__mod_specific:
-            parts[1] = mod_name
+            parts[1] = files.mod_name_uuid
         return "/".join(parts)
 
     def replace_xml(self, new_content: ElementTree) -> None:
@@ -468,7 +473,7 @@ class game_files:
                 progress_callback(count, total_count, s)
 
             relative_file_path = translate_path(gf.relative_file_path)
-            output_relative_path = translate_path(gf.get_output_relative_path(self.__mod_name))
+            output_relative_path = translate_path(gf.get_output_relative_path(self))
             if verbose:
                 sys.stdout.write(f"Writing {output_relative_path} ")
             match gf.file_format:
