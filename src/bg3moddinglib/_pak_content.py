@@ -137,7 +137,8 @@ class pak_content:
         self.__pak_files = tuple(self.__tool.list(self.__pak_file_path))
         cb : content_bundle
         content_bundles = dict[str, content_bundle]()
-        for file_path in self.__pak_files:               
+
+        for file_path in self.__pak_files:
             if file_path.startswith('Public/'):
                 if '/Content/' in file_path and file_path.endswith('.lsf'):
                     if '/Generated/' in file_path:
@@ -180,6 +181,7 @@ class pak_content:
             elif file_path.startswith('Mods/') and file_path.endswith('/meta.lsx'):
                 meta_lsx = self.__assets.tool.unpack(self.__pak_file_path, file_path)
                 self.__meta_lsx = et.parse(meta_lsx).getroot()
+
         for fn, cb in content_bundles.items():
             if fn in self.__dialog_bank:
                 dialog_res = self.__dialog_bank[fn]
@@ -234,11 +236,19 @@ class pak_content:
             return self.__dialog_bank[dialog_id]
         raise KeyError(f'dialog not found in the bank: {dialog_id}')
 
+    def get_dialog_name(self, dialog_id: str) -> str:
+        dialog_id = dialog_id.lower()
+        if dialog_id in self.__dialog_bank:
+            res = self.__dialog_bank[dialog_id]
+            source_file = get_required_bg3_attribute(res, 'SourceFile')
+            return os.path.basename(source_file).lower()[:-4]
+        raise KeyError(f'dialog not found in the bank: {dialog_id}')
+
     def get_timeline_resource(self, timeline_id: str) -> XmlElement:
         timeline_id = timeline_id.lower()
         if timeline_id in self.__timeline_bank:
             return self.__timeline_bank[timeline_id]
-        raise KeyError(f'dialog not found in the bank: {timeline_id}')
+        raise KeyError(f'timeline not found in the bank: {timeline_id}')
 
     def get_dialog_object(self, dialog_uuid: str) -> dialog_object:
         cb = self.get_content_bundle(dialog_uuid)

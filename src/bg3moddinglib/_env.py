@@ -5,9 +5,11 @@ import os
 import requests
 import shutil
 import time
+import traceback
 import zipfile
 
 from ._common import translate_path
+from ._logger import get_logger
 
 
 from typing import cast
@@ -146,7 +148,15 @@ class bg3_modding_env:
 
     def cleanup_output(self) -> None:
         if os.path.isdir(self.__output_path):
-            shutil.rmtree(self.__output_path)
+            try:
+                shutil.rmtree(self.__output_path)
+            except:
+                get_logger().error(f'bg3_modding_env.cleanup_output() failed due to exception: {traceback.format_exc()}')
+        if os.path.isdir(self.__output_path):
+            try:
+                shutil.rmtree(self.__output_path, ignore_errors = True)
+            except:
+                get_logger().error(f'bg3_modding_env.cleanup_output() failed due to exception: {traceback.format_exc()}')
         os.makedirs(self.__output_path)
 
     def __lslib_exists(self) -> bool:
@@ -220,6 +230,7 @@ class bg3_modding_env:
                 self.__index_paths = index_paths
         except Exception as exc:
             raise RuntimeError(f"Failed to read configuration from {config_file_path}") from exc
+
 
     def __sanity_check(self) -> None:
         if not (os.path.isfile(os.path.join(self.__bg3_data_path, "Gustav.pak")) \

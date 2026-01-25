@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import ctypes
 import decimal as dc
 import io
 import numpy as np
 import os
+import subprocess
+import tempfile
 import uuid
 import xml.etree.ElementTree as et
 
@@ -17,6 +20,8 @@ def decimal_from_str(val: str | dc.Decimal) -> dc.Decimal:
     if isinstance(val, dc.Decimal):
         return val
     if isinstance(val, str):
+        # in some locales, numbers have decimal commas instead of points
+        val = val.replace(',', '.', 1)
         pos = val.find('.')
         if pos == -1:
             n = 0
@@ -513,3 +518,31 @@ def find_bg3_appdata_path() -> str | None:
         if os.path.isdir(bg3_appdata_path):
             return bg3_appdata_path
     return None
+
+def is_path_length_limited() -> bool:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        result = False
+        test_dir = os.path.join(temp_dir, *['_fifteen_chars_'] * 20)
+        try:
+            os.makedirs(test_dir, exist_ok=True)
+            with open(os.path.join(test_dir, 'test_file.txt'), 'w') as f:
+                f.write('test')
+        except:
+            result = True
+    return result
+
+def enable_long_paths_with_prompt() -> None: # type: ignore
+    ctypes.windll.shell32.ShellExecuteW(
+        None,
+        "runas",  # Request elevation
+        "reg",    # Command to run
+        'add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f',
+        None,
+        1  # SW_SHOWNORMAL
+    )
+
+def check_long_path_enabled_registry_setting() -> bool:
+    result = subprocess.run(["reg", "query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem", "/v", "LongPathsEnabled"], capture_output = True, text = True)
+    s = result.stdout
+    return 'LongPathsEnabled' in s and '0x1' in s
+        

@@ -11,7 +11,7 @@ from typing import Callable, cast
 from ._logger import logger
 
 
-VERSION = (0, 1, 0, 2)
+VERSION = (0, 2, 0, 1)
 DEFAULT_MOD_NAME = 'CompatibilityPatch'
 DEFAULT_MOD_UUID = '66553d67-3639-4530-babb-4535f3d61f04'
 

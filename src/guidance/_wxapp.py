@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import bg3moddinglib as bg3
 import os
 import wx
 import wx.lib.scrolledpanel as scrolled
+
+import bg3moddinglib as bg3
 
 from typing import Callable, cast
 from uuid import uuid4
@@ -156,7 +157,7 @@ class MainWindow(wx.Frame):
         self.__conflict_resolution_panel = scrolled.ScrolledPanel(self.__right_panel, style = wx.BORDER_RAISED)
         self.__conflict_resolution_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        self.__conflict_resolution_sizer.Add(wx.StaticText(self.__conflict_resolution_panel, label = 'Please specify the priority order of mods so conflicts can be resolved.'), flag = wx.TOP, border = 10)
+        self.__conflict_resolution_sizer.Add(wx.StaticText(self.__conflict_resolution_panel, label = 'Please select conflicts that you would like to get resolved.'), flag = wx.TOP, border = 10)
 
         self.__conflict_resolution_panel.SetSizer(self.__conflict_resolution_sizer)
         self.__conflict_resolution_panel.SetupScrolling(False, True)
@@ -476,7 +477,7 @@ class MainWindow(wx.Frame):
 
     def __populate_conflict_info(self) -> None:
         if self.__g is None or len(self.__g.mod_manager.conflicts) == 0:
-            self.__conflicts_summary.SetLabel(f'There are no conflicts across dialog files')
+            self.__conflicts_summary.SetLabel(f'No conflicts are selected for resolution.')
             return
 
         for label in self.__mod_priorities_labels:
@@ -547,12 +548,12 @@ class MainWindow(wx.Frame):
         self.__conflict_resolution_panel.SetupScrolling()
 
         if n == 0:
-            self.__conflicts_summary.SetLabel(f'There are no conflicts across dialog files')
+            self.__conflicts_summary.SetLabel(f'No conflicts are selected for resolution.')
         else:
             if n == 1:
-                self.__conflicts_summary.SetLabel(f'Found 1 dialog file with conflicts')
+                self.__conflicts_summary.SetLabel(f'Found 1 dialog file with conflicts.')
             else:
-                self.__conflicts_summary.SetLabel(f'Found {n} dialog files with conflicts')
+                self.__conflicts_summary.SetLabel(f'Found {n} dialog files with conflicts.')
 
     def __create_settings(self, method: bg3.conflict_resolution_method) -> str | bg3.conflict_resolution_settings:
         if self.__g is None:

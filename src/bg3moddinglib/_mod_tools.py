@@ -284,6 +284,20 @@ class mod_manager:
         self.__conflicts = list[mod_conflict]()
         mods_with_conflicts = set[str]()
         for conflicted_mods, conflicted_dialogs in conflicts_grouped.items():
+
+            # # TODO: replace this stub with correct handling of unknown dialogs
+            unknown_dialogs = False
+            for dialog_uuid in conflicted_dialogs:
+                try:
+                    self.__assets.index.get_dialog_name(dialog_uuid)
+                except:
+                    self.add_to_report(f'unknown dialog: {dialog_uuid}')
+                    unknown_dialogs = True
+            # For now, if conflcits are in unknown dialogs, skip them
+            if unknown_dialogs:
+                self.add_to_report(f'the following mods have conflicts in unknown dialogs: {', '.join(conflicted_mods)}')
+                continue
+
             for mod_uuid in conflicted_mods:
                 mods_with_conflicts.add(mod_uuid)
             mods = [self.get_mod_info(mod_uuid) for mod_uuid in conflicted_mods]
@@ -352,9 +366,11 @@ class mod_manager:
             content = pak_content(self.__assets, pak_path)
             if content.meta_lsx is None:
                 self.add_to_report(f'Failed to process mod {pak_path}: meta.lsx is not found')
+                return
             module_info = content.meta_lsx.find('./region[@id="Config"]/node[@id="root"]/children/node[@id="ModuleInfo"]')
             if module_info is None:
                 self.add_to_report(f'Failed to process mod {pak_path}: ModuleInfo is not present in meta.lsx')
+                return
             mod_uuid = get_required_bg3_attribute(module_info, 'UUID')
             mod_folder = get_required_bg3_attribute(module_info, 'Folder')
             mod_name = get_required_bg3_attribute(module_info, 'Name')
@@ -382,7 +398,7 @@ class mod_manager:
                 modinfo = mod_info(mod_name, mod_uuid, mod_version, pak_path, content.files, content, content.meta_lsx, mod_description, mod_author, mod_folder, mod_short_name, False)
                 self.__mods_index[mod_uuid] = modinfo
                 self.__mods.append(modinfo)
-        except BaseException as exc:
+        except:
             self.add_to_report(f'Failed to process mod {pak_path}: {traceback.format_exc()}')
 
     def __filter_out_mods(self) -> None:
@@ -523,13 +539,6 @@ class mod_manager:
                     for mod_uuid in settings.priority_order:
                         self.uninstall_mod(mod_uuid)
                     self.install_mod(pak_path)
-            #     appdata_path = find_bg3_appdata_path()
-            #     if appdata_path is not None:
-            #         os.startfile(os.path.join(appdata_path, 'Mods'))
-            #     else:
-            #         os.startfile(os.path.dirname(pak_path))
-            # else:
-            #     os.startfile(os.path.dirname(pak_path))
 
             success = True
             return (True, 'Success')
@@ -900,9 +909,10 @@ class mod_manager:
                 continue
             mod_uuid = modinfo.mod_uuid
             if modcontent.has_content_bundle(dialog_uuid):
+                cb = modcontent.get_content_bundle(dialog_uuid)
+
                 if result_dialog is None:
-                    # the top priority dialog object (fallback to original game dialog)
-                    cb = modcontent.get_content_bundle(dialog_uuid)
+                    # the top priority dialog object
                     if cb.dialog_file:
                         self.add_to_report(f'baseline dialog {dialog_name} is taken from mod {modinfo.mod_short_name} [{mod_uuid}]')
                         self.append_to_exclusion_list(mod_uuid, cb.dialog_file)
@@ -910,14 +920,8 @@ class mod_manager:
                         result_dialog_resource = self.get_dialog_resource(dialog_uuid, modcontent)
                         dialog_nodes_diff = d_differ.get_modified_dialog_nodes(result_dialog, dialog_uuid)
                         root_nodes_diff = d_differ.get_modified_dialog_root_nodes(result_dialog, dialog_uuid)
-                    # else:
-                    #     self.add_to_report(f'baseline dialog {dialog_name} is taken from the vanilla game')
-                    #     result_dialog = self.__assets.get_dialog_object(dialog_uuid)
-                    #     result_dialog_resource = self.__assets.get_dialog_resource(dialog_uuid)
-                    #     result_dialog.dialog_file.is_mod_specific = True
                 else:
                     # the next conflicting dialog object
-                    cb = modcontent.get_content_bundle(dialog_uuid)
                     if cb.dialog_file:
                         self.add_to_report(f'merging dialog {dialog_name} from mod {modinfo.mod_short_name} [{mod_uuid}]')
                         self.append_to_exclusion_list(mod_uuid, cb.dialog_file)
@@ -928,7 +932,6 @@ class mod_manager:
 
                 if result_timeline is None:
                     # the top priority timeline object
-                    cb = modcontent.get_content_bundle(dialog_uuid)
                     if cb.timeline_file:
                         self.add_to_report(f'baseline timeline {timeline_name} is taken from mod {modinfo.mod_short_name} [{mod_uuid}]')
                         self.append_to_exclusion_list(mod_uuid, cb.timeline_file)
@@ -943,14 +946,8 @@ class mod_manager:
                         for diff_state in timeline_nodes_diff.values():
                             phase_uuid = diff_state.split('|')[1]
                             changed_phases.add(phase_uuid)
-                    # else:
-                    #     self.add_to_report(f'baseline timeline {timeline_name} is taken from the vanilla game')
-                    #     result_timeline = self.__assets.get_timeline_object(dialog_uuid)
-                    #     result_timeline_resource = self.__assets.get_timeline_resource(cb.timeline_uuid)
-                    #     result_timeline.timeline_file.is_mod_specific = True
                 else:
                     # the next conflicting timeline object
-                    cb = modcontent.get_content_bundle(dialog_uuid)
                     if cb.timeline_file:
                         self.add_to_report(f'merging timeline {timeline_name} from mod {modinfo.mod_short_name} [{mod_uuid}]')
                         self.append_to_exclusion_list(mod_uuid, cb.timeline_file)
@@ -1025,6 +1022,7 @@ class mod_manager:
                 self.add_to_report(f'added dialog {dialog_name} to the dialog bank, dialog uuid = {dialog_uuid}')
             else:
                 self.add_to_report(f'unexpected: dialog resource for {dialog_name} is None, dialog uuid = {dialog_uuid}')
+
         if result_timeline is not None:
             result_timeline.timeline_file.is_mod_specific = True
             self.__assets.files.add(result_timeline.timeline_file)
@@ -1034,9 +1032,11 @@ class mod_manager:
                 self.add_to_report(f'added timeline {timeline_name} to the timeline bank')
             else:
                 self.add_to_report(f'unexpected: timeline resource for {timeline_name} is None, dialog uuid = {dialog_uuid}')
+
         if result_scene_file_lsf is not None:
             self.__assets.files.add(result_scene_file_lsf)
             self.add_to_report(f'added scene file for {timeline_name} to the build, file name {result_scene_file_lsf.relative_file_path}, output file name {result_scene_file_lsf.get_output_relative_path(self.__assets.files)}')
+
         if result_scene_file_lsx is not None:
             self.__assets.files.add(result_scene_file_lsx)
             self.add_to_report(f'added scene file for {timeline_name} to the build, file name {result_scene_file_lsx.relative_file_path}, output file name {result_scene_file_lsx.get_output_relative_path(self.__assets.files)}')
@@ -1153,6 +1153,15 @@ class mod_manager:
             self.add_to_report(f'finished merging dialog nodes for {dialog_uuid}')
 
 
+    def __print_tl_shot_node_interval(self, node: XmlElement, what: str) -> None:
+        if get_bg3_attribute(node, 'Type') == 'TLShot':
+            node_uuid = get_required_bg3_attribute(node, 'ID')
+            start = get_bg3_attribute(node, 'StartTime')
+            if start is None:
+                start = '0.0'
+            end = get_required_bg3_attribute(node, 'EndTime')
+            self.add_to_report(f'{what} node interval [{node_uuid}]: {start} to {end}')
+
     def merge_timeline_nodes(
             self,
             dialog_uuid: str,
@@ -1163,6 +1172,7 @@ class mod_manager:
     ) -> None:
         try:
             self.add_to_report(f'merging timeline nodes for {dialog_uuid}')
+            self.add_to_report(f'destination timeline duration: {destination_timeline.duration}')
             for node_uuid, node_state in source_timeline_diff.items():
                 self.add_to_report(f'timeline node {node_uuid}, diff {node_state}')
                 p = node_state.split('|')
@@ -1181,16 +1191,25 @@ class mod_manager:
                     else:
                         self.add_to_report(f'timeline phase {phase_uuid} does not exists in the result')
                         source_phase = source_timeline.get_timeline_phase(phase_uuid)
+                        self.add_to_report(f'source phase {phase_uuid} starts at {source_phase.start}, ends at {source_phase.end}')
                         destination_timeline.create_new_phase(source_phase.dialog_node_uuid, source_phase.duration, additional_nodes=source_phase.group_nodes_uuids)
                         destionation_phase = destination_timeline.use_existing_phase(phase_uuid)
-                        self.add_to_report(f'timeline phase {phase_uuid} was created in the result, phase index {destionation_phase.index}')
+                        self.add_to_report(f'timeline phase {phase_uuid} was created in the result, phase index {destionation_phase.index}, source phase index {source_phase.index}')
+                        self.add_to_report(f'destination phase {phase_uuid} starts at {destionation_phase.start}, ends at {destionation_phase.end}')
+                        self.add_to_report(f'destination timeline duration: {destination_timeline.duration}')
                     if destination_timeline.has_effect_component(node_uuid):
                         self.add_to_report(f'timeline phase {phase_uuid} in the result contains existing node {node_uuid}, removing it')
                         destination_timeline.remove_effect_component(node_uuid)
                     effect_component = source_timeline.find_effect_component(node_uuid)
+                    self.__print_tl_shot_node_interval(effect_component, 'source effect_component')
                     source_phase = source_timeline.get_timeline_phase(phase_uuid)
                     normalized_node = timeline_differ.normalize_tl_node(effect_component, source_phase.start)
+                    self.__print_tl_shot_node_interval(normalized_node, 'source normalized_node')
                     destination_node = timeline_differ.normalize_tl_node(normalized_node, destionation_phase.start.copy_negate())
+                    self.__print_tl_shot_node_interval(destination_node, 'destination_node')
+                    set_bg3_attribute(destination_node, 'PhaseIndex', destionation_phase.index, attribute_type = 'int64')
+
+
                     self.add_to_report(f'normalized node {node_uuid}, source start {source_phase.start}, start in the result {destionation_phase.start}')
                     destination_timeline.insert_new_tl_node(destination_node)
                     self.add_to_report(f'timeline phase {phase_uuid}, added node {node_uuid} to the result')
