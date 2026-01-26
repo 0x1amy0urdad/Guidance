@@ -647,6 +647,7 @@ class bg3_assets:
         for ab in self.__asset_bundles.values():
             d = dialog_object(ab.dialog)
             if not ab.timeline.is_empty:
+                print(ab.timeline.relative_file_path)
                 timeline_object(ab.timeline, d).post_process()
 
 

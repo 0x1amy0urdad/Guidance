@@ -293,7 +293,7 @@ class mod_manager:
                 except:
                     self.add_to_report(f'unknown dialog: {dialog_uuid}')
                     unknown_dialogs = True
-            # For now, if conflcits are in unknown dialogs, skip them
+            # For now, if conflicts are in unknown dialogs, skip them
             if unknown_dialogs:
                 self.add_to_report(f'the following mods have conflicts in unknown dialogs: {', '.join(conflicted_mods)}')
                 continue
@@ -1153,14 +1153,14 @@ class mod_manager:
             self.add_to_report(f'finished merging dialog nodes for {dialog_uuid}')
 
 
-    def __print_tl_shot_node_interval(self, node: XmlElement, what: str) -> None:
-        if get_bg3_attribute(node, 'Type') == 'TLShot':
-            node_uuid = get_required_bg3_attribute(node, 'ID')
-            start = get_bg3_attribute(node, 'StartTime')
-            if start is None:
-                start = '0.0'
-            end = get_required_bg3_attribute(node, 'EndTime')
-            self.add_to_report(f'{what} node interval [{node_uuid}]: {start} to {end}')
+    def __print_node_interval(self, node: XmlElement, what: str) -> None:
+        node_uuid = get_required_bg3_attribute(node, 'ID')
+        start = get_bg3_attribute(node, 'StartTime')
+        if start is None:
+            start = '0.0'
+        end = get_required_bg3_attribute(node, 'EndTime')
+        self.add_to_report(f'{what} node interval [{node_uuid}]: {start} to {end}')
+
 
     def merge_timeline_nodes(
             self,
@@ -1197,16 +1197,18 @@ class mod_manager:
                         self.add_to_report(f'timeline phase {phase_uuid} was created in the result, phase index {destionation_phase.index}, source phase index {source_phase.index}')
                         self.add_to_report(f'destination phase {phase_uuid} starts at {destionation_phase.start}, ends at {destionation_phase.end}')
                         self.add_to_report(f'destination timeline duration: {destination_timeline.duration}')
+                    
                     if destination_timeline.has_effect_component(node_uuid):
                         self.add_to_report(f'timeline phase {phase_uuid} in the result contains existing node {node_uuid}, removing it')
                         destination_timeline.remove_effect_component(node_uuid)
+                    
                     effect_component = source_timeline.find_effect_component(node_uuid)
-                    self.__print_tl_shot_node_interval(effect_component, 'source effect_component')
+                    self.__print_node_interval(effect_component, 'source effect_component')
                     source_phase = source_timeline.get_timeline_phase(phase_uuid)
-                    normalized_node = timeline_differ.normalize_tl_node(effect_component, source_phase.start)
-                    self.__print_tl_shot_node_interval(normalized_node, 'source normalized_node')
+                    normalized_node = timeline_differ.normalize_tl_node(effect_component, source_phase.start, source_phase.duration)
+                    self.__print_node_interval(normalized_node, 'source normalized_node')
                     destination_node = timeline_differ.normalize_tl_node(normalized_node, destionation_phase.start.copy_negate())
-                    self.__print_tl_shot_node_interval(destination_node, 'destination_node')
+                    self.__print_node_interval(destination_node, 'destination_node')
                     set_bg3_attribute(destination_node, 'PhaseIndex', destionation_phase.index, attribute_type = 'int64')
 
 

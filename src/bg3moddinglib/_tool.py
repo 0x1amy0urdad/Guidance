@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import locale
 import os
 import os.path
 import shutil
@@ -11,6 +12,9 @@ from typing import cast
 
 from ._common import translate_path
 from ._env import bg3_modding_env
+
+locale.setlocale(locale.LC_ALL, '')
+LOCALE_CONVERSION_NEEDED = locale.localeconv()["decimal_point"] == ','
 
 def initialize_dot_net() -> bool:
     try:
@@ -45,6 +49,7 @@ class bg3_modding_tool:
     __env: bg3_modding_env
     __work_dir: str
     __toolkit_present: bool
+    __decimal_comma: bool
 
     def __init__(self, env: bg3_modding_env) -> None:
         self.__env = env

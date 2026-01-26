@@ -15,12 +15,10 @@ from typing import Any, Callable
 # Precision of timestapms in timelines
 TIMELINE_PRECISION = 4
 
-
 def decimal_from_str(val: str | dc.Decimal) -> dc.Decimal:
     if isinstance(val, dc.Decimal):
         return val
     if isinstance(val, str):
-        # in some locales, numbers have decimal commas instead of points
         val = val.replace(',', '.', 1)
         pos = val.find('.')
         if pos == -1:
@@ -42,6 +40,7 @@ def decimal_from(val: str | dc.Decimal | float) -> dc.Decimal:
     if isinstance(val, dc.Decimal):
         return val
     if isinstance(val, str):
+        val = val.replace(',', '.', 1)
         pos = val.find('.')
         if pos == -1:
             n = 0
@@ -58,10 +57,12 @@ def decimal_from(val: str | dc.Decimal | float) -> dc.Decimal:
     return dc.Decimal(val).quantize(TIMELINE_DECIMAL_PRECISION)
 
 
-def decimal_to_str(val: dc.Decimal) -> str:
+def decimal_to_str(val: dc.Decimal | str) -> str:
+    if isinstance(val, str):
+        return val
     if val.is_zero():
-        return '0'
-    return f'{val:f}'
+        return '0.0'
+    return str(val)
 
 
 TIMELINE_DECIMAL_PRECISION = dc.Decimal('0.' + '0' * (TIMELINE_PRECISION - 1) + '1')
